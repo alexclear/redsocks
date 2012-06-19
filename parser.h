@@ -28,6 +28,9 @@ typedef int  (*parser_section_onexit)(parser_section *section);
 
 struct parser_section_t {
 	parser_section         *next;
+	parser_section         *nested_head;
+	parser_section         *nested_tail;
+	parser_section         *parent;
 	parser_context         *context;
 	const char             *name;
 	parser_section_onenter  onenter; // is called on entry to section

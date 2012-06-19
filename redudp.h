@@ -1,11 +1,18 @@
 #ifndef REDUDP_H
 #define REDUDP_H
 
+typedef struct redudp_dest_t {
+	struct redudp_dest_t  *next;
+        struct sockaddr_in     destaddr;
+} redudp_dest;
+
 typedef struct redudp_config_t {
 	struct sockaddr_in bindaddr;
 	struct sockaddr_in relayaddr;
 	// TODO:           outgoingaddr;
-	struct sockaddr_in destaddr;
+	redudp_dest       *destaddr_head;
+	redudp_dest       *destaddr_tail;
+	redudp_dest       *destaddr_cur;
 	char *login;
 	char *password;
 	uint16_t max_pktqueue;

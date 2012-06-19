@@ -391,10 +391,13 @@ static value_parser value_parser_by_type[] =
 	[pt_in_addr2] = vp_in_addr2,
 };
 
+extern parser_section redudp_dest_conf_section;
+
 int parser_run(parser_context *context)
 {
 	char *section_token = NULL, *key_token = NULL, *value_token = NULL;
 	parser_section *section = NULL;
+	parser_section *nested_section = NULL;
 	bool in_comment = false;
 	bool need_more_space = false;
 	bool need_more_data  = true;
@@ -471,7 +474,32 @@ int parser_run(parser_context *context)
 			}
 			else if (strcmp(token, "{") == 0) { // } - I love folding
 				if (section) {
-					parser_error(context, "section-in-section is invalid");
+					if (!key_token) {
+						parser_error(context, "nested section seems to be unnamed, please double check");
+					}
+					fprintf(stderr, "Section-in-section name: %s\n", key_token);
+					nested_section = malloc(sizeof(parser_section)); // TODO: free at some point
+					nested_section->entries = redudp_dest_conf_section.entries;
+					nested_section->onenter = redudp_dest_conf_section.onenter;
+					nested_section->onexit = redudp_dest_conf_section.onexit;
+					nested_section->name = "dest";
+
+					if (section->nested_head == NULL) {
+						section->nested_head = nested_section;
+						fprintf(stderr, "Setting head\n");
+					}
+					if (section->nested_tail != NULL) {
+						section->nested_tail->next = nested_section;
+						fprintf(stderr, "Setting next\n");
+					}
+					section->nested_tail = nested_section;
+					nested_section->parent = section;
+					section = nested_section;
+					if (section->onenter)
+						if ( section->onenter(section) == -1 )
+							parser_error(context, "section->onenter failed");
+					FREE(key_token);
+					// parser_error(context, "section-in-section is invalid");
 				}
 				else if (!section_token) {
 					parser_error(context, "expected token before ``{''"); // } - I love folding
@@ -499,7 +527,12 @@ int parser_run(parser_context *context)
 					if (section->onexit)
 						if ( section->onexit(section) == -1 )
 							parser_error(context, "section->onexit failed");
-					section = NULL;
+					if (section->parent) {
+						section = section->parent;
+					}
+					else {
+						section = NULL;
+					}
 				}
 				else {
 					parser_error(context, "can't close non-opened section");

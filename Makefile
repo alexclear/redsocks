@@ -5,8 +5,8 @@ DEPS := .depend
 OUT := redsocks
 VERSION := 0.4
 
-LIBS := -levent
-CFLAGS += -g -O2
+LIBS := -levent -lglib-2.0
+CFLAGS += -g -O2 -I/usr/include/glib-2.0 -I/usr/lib/glib-2.0/include
 override CFLAGS += -std=gnu99 -Wall
 
 all: $(OUT)

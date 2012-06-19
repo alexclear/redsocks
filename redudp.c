@@ -14,6 +14,10 @@
  * under the License.
  */
 
+#define IP_TRANSPARENT  19
+#define IP_ORIGDSTADDR       20
+#define IP_RECVORIGDSTADDR   IP_ORIGDSTADDR
+
 #include <stdlib.h>
 #include <search.h>
 #include <string.h>
@@ -24,6 +28,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <assert.h>
+#include <glib.h>
 
 #include "list.h"
 #include "log.h"
@@ -167,15 +172,43 @@ static int redudp_transparent(int fd)
 
 static int do_tproxy(redudp_instance* instance)
 {
-	return instance->config.destaddr.sin_addr.s_addr == 0;
+	return instance->config.destaddr_head == NULL;
+//	return instance->config.destaddr.sin_addr.s_addr == 0;
 }
+
+GHashTable *destaddrs_table;
 
 static struct sockaddr_in* get_destaddr(redudp_client *client)
 {
+	struct sockaddr_in* result;
 	if (do_tproxy(client->instance))
 		return &client->destaddr;
-	else
-		return &client->instance->config.destaddr;
+	else {
+		if(destaddrs_table == NULL) {
+			fprintf(stderr, "Creating the hashtable\n");
+			destaddrs_table = g_hash_table_new(NULL, NULL);
+		}
+		fprintf(stderr, "getting destaddr for: %li\n", (long) client );
+		result = g_hash_table_lookup(destaddrs_table, client);
+		if(result == NULL) {
+			// Round robin in all its glory
+			if(client->instance->config.destaddr_cur == NULL) {
+				client->instance->config.destaddr_cur = client->instance->config.destaddr_head;
+			}
+			else {
+				if(client->instance->config.destaddr_cur == client->instance->config.destaddr_tail) {
+					client->instance->config.destaddr_cur = client->instance->config.destaddr_head;
+				}
+				else {
+					client->instance->config.destaddr_cur = client->instance->config.destaddr_cur->next;
+				}
+			}
+			result = &client->instance->config.destaddr_cur->destaddr;
+			fprintf(stderr, "Putting to the hash, total size now is: %i\n", g_hash_table_size(destaddrs_table));
+			g_hash_table_replace(destaddrs_table, client, result);
+		}
+		return result;
+	}
 }
 
 static void redudp_fill_preamble(socks5_udp_preabmle *preamble, redudp_client *client)
@@ -239,6 +272,7 @@ static void redudp_drop_client(redudp_client *client)
 		free(q);
 	}
 	list_del(&client->list);
+	g_hash_table_remove(destaddrs_table, client);
 	free(client);
 }
 
@@ -462,10 +496,12 @@ static void redudp_read_auth_methods(struct bufferevent *buffev, void *_arg)
 
 		client->relay->readcb = redudp_read_auth_reply;
 	}
+	redudp_log_error(client, LOG_NOTICE, "All OK");
 
 	return;
 
 fail:
+	redudp_log_error(client, LOG_NOTICE, "Fail!");
 	redudp_drop_client(client);
 }
 
@@ -522,6 +558,8 @@ static void redudp_first_pkt_from_client(redudp_instance *self, struct sockaddr_
 		return;
 	}
 
+        char relayaddr_str[RED_INET_ADDRSTRLEN];
+
 	INIT_LIST_HEAD(&client->list);
 	INIT_LIST_HEAD(&client->queue);
 	client->instance = self;
@@ -533,6 +571,7 @@ static void redudp_first_pkt_from_client(redudp_instance *self, struct sockaddr_
 
 	client->sender_fd = -1; // it's postponed until socks-server replies to avoid trivial DoS
 
+//	fprintf(stderr, "addr: %s", red_inet_ntop(&client->instance->config.relayaddr, relayaddr_str, sizeof(relayaddr_str)));
 	client->relay = red_connect_relay(&client->instance->config.relayaddr,
 	                                  redudp_relay_connected, redudp_relay_error, client);
 	if (!client->relay)
@@ -701,7 +740,10 @@ static int redudp_onenter(parser_section *section)
 	instance->config.bindaddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 	instance->config.relayaddr.sin_family = AF_INET;
 	instance->config.relayaddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-	instance->config.destaddr.sin_family = AF_INET;
+//	instance->config.destaddr.sin_family = AF_INET;
+	instance->config.destaddr_cur = NULL;
+	instance->config.destaddr_head = NULL;
+	instance->config.destaddr_tail = NULL;
 	instance->config.max_pktqueue = 5;
 	instance->config.udp_timeout = 30;
 	instance->config.udp_timeout_stream = 180;
@@ -714,8 +756,8 @@ static int redudp_onenter(parser_section *section)
 			(strcmp(entry->key, "port") == 0)       ? (void*)&instance->config.relayaddr.sin_port :
 			(strcmp(entry->key, "login") == 0)      ? (void*)&instance->config.login :
 			(strcmp(entry->key, "password") == 0)   ? (void*)&instance->config.password :
-			(strcmp(entry->key, "dest_ip") == 0)    ? (void*)&instance->config.destaddr.sin_addr :
-			(strcmp(entry->key, "dest_port") == 0)  ? (void*)&instance->config.destaddr.sin_port :
+//			(strcmp(entry->key, "dest_ip") == 0)    ? (void*)&instance->config.destaddr.sin_addr :
+//			(strcmp(entry->key, "dest_port") == 0)  ? (void*)&instance->config.destaddr.sin_port :
 			(strcmp(entry->key, "max_pktqueue") == 0) ? (void*)&instance->config.max_pktqueue :
 			(strcmp(entry->key, "udp_timeout") == 0) ? (void*)&instance->config.udp_timeout:
 			(strcmp(entry->key, "udp_timeout_stream") == 0) ? (void*)&instance->config.udp_timeout_stream :
@@ -734,7 +776,7 @@ static int redudp_onexit(parser_section *section)
 
 	instance->config.bindaddr.sin_port = htons(instance->config.bindaddr.sin_port);
 	instance->config.relayaddr.sin_port = htons(instance->config.relayaddr.sin_port);
-	instance->config.destaddr.sin_port = htons(instance->config.destaddr.sin_port);
+//	instance->config.destaddr.sin_port = htons(instance->config.destaddr.sin_port);
 
 	if (instance->config.udp_timeout_stream < instance->config.udp_timeout) {
 		parser_error(section->context, "udp_timeout_stream should be not less then udp_timeout");
@@ -780,7 +822,7 @@ static int redudp_init_instance(redudp_instance *instance)
 		char buf1[RED_INET_ADDRSTRLEN], buf2[RED_INET_ADDRSTRLEN];
 		log_error(LOG_DEBUG, "redudp @ %s: destaddr=%s",
 			red_inet_ntop(&instance->config.bindaddr, buf1, sizeof(buf1)),
-			red_inet_ntop(&instance->config.destaddr, buf2, sizeof(buf2)));
+			"To be defined");
 	}
 
 	error = bind(fd, (struct sockaddr*)&instance->config.bindaddr, sizeof(instance->config.bindaddr));
@@ -878,6 +920,59 @@ static parser_section redudp_conf_section =
 	.entries = redudp_entries,
 	.onenter = redudp_onenter,
 	.onexit  = redudp_onexit
+};
+
+static parser_entry redudp_dest_entries[] =
+{
+	{ .key = "dest_ip",    .type = pt_in_addr },
+	{ .key = "dest_port",  .type = pt_uint16 },
+	{ }
+};
+
+static int redudp_dest_onenter(parser_section *section)
+{
+	redudp_instance *instance = section->parent->data;
+	redudp_dest *dest = calloc(1, sizeof(*dest));
+	if (!dest) {
+		parser_error(section->context, "Not enough memory");
+		return -1;
+	}
+
+	dest->destaddr.sin_family = AF_INET;
+
+	for (parser_entry *entry = &section->entries[0]; entry->key; entry++)
+		entry->addr =
+			(strcmp(entry->key, "dest_ip") == 0)    ? (void*)&dest->destaddr.sin_addr :
+			(strcmp(entry->key, "dest_port") == 0)  ? (void*)&dest->destaddr.sin_port :
+			NULL;
+
+        if (instance->config.destaddr_head == NULL) {
+		instance->config.destaddr_head = dest;
+                fprintf(stderr, "Setting dest head\n");
+        }
+        if (instance->config.destaddr_tail != NULL) {
+                instance->config.destaddr_tail->next = dest;
+                fprintf(stderr, "Setting dest next\n");
+        }
+        instance->config.destaddr_tail = dest;
+
+//	section->data = instance;
+	return 0;
+}
+
+static int redudp_dest_onexit(parser_section *section)
+{
+	redudp_instance *instance = section->parent->data;
+	instance->config.destaddr_tail->destaddr.sin_port = htons(instance->config.destaddr_tail->destaddr.sin_port);
+	return 0;
+}
+
+parser_section redudp_dest_conf_section =
+{
+	.name    = "dest",
+	.entries = redudp_dest_entries,
+	.onenter = redudp_dest_onenter,
+	.onexit  = redudp_dest_onexit
 };
 
 app_subsys redudp_subsys =
