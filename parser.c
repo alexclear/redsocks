@@ -331,6 +331,82 @@ static int vp_in_addr(parser_context *context, void *addr, const char *token)
 	return 0;
 }
 
+static int vp_in_addr_list(parser_context *context, void *addr, const char *token)
+{
+	in_addr_list *addr_list = (in_addr_list*) addr;
+
+        in_addr_list_item *addr_list_item;
+
+	struct in_addr ia;
+
+	if (inet_aton(token, &ia)) {
+	        addr_list_item = calloc(1, sizeof(*addr_list_item));
+        	if (!addr_list_item) {
+                	parser_error(context, "Not enough memory");
+                	return -1;
+       		}
+        	addr_list_item->addr.sin_family = AF_INET;
+		memcpy(&addr_list_item->addr.sin_addr, &ia, sizeof(ia));
+		addr_list->head = addr_list_item;
+	}
+	else {
+		struct addrinfo *ainfo, hints;
+		int err;
+		memset(&hints, 0, sizeof(hints));
+		hints.ai_family = AF_INET; /* IPv4-only */
+		hints.ai_socktype = SOCK_STREAM; /* I want to have one address once and ONLY once, that's why I specify socktype and protocol */
+		hints.ai_protocol = IPPROTO_TCP;
+		hints.ai_flags = AI_ADDRCONFIG; /* I don't need IPv4 addrs without IPv4 connectivity */
+		err = getaddrinfo(token, NULL, &hints, &ainfo);
+		if (err == 0) {
+			int count, taken;
+			struct addrinfo *iter;
+			struct sockaddr_in *resolved_addr;
+			for (iter = ainfo, count = 0; iter; iter = iter->ai_next, ++count)
+			{
+	                        resolved_addr = (struct sockaddr_in*)iter->ai_addr;
+        	                assert(resolved_addr->sin_family == iter->ai_family && iter->ai_family == AF_INET);
+//                	        if (count != 1)
+//                        	        log_error(LOG_WARNING, "%s resolves to %d addresses, using %s",
+//                                	          token, count, inet_ntoa(resolved_addr->sin_addr));
+			        addr_list_item = calloc(1, sizeof(*addr_list_item));
+        			if (!addr_list_item) {
+                			parser_error(context, "Not enough memory");
+                			return -1;
+       				}
+       			 	addr_list_item->addr.sin_family = AF_INET;
+                     		memcpy(&addr_list_item->addr.sin_addr, &resolved_addr->sin_addr, sizeof(ia));
+				if(addr_list->head == NULL) {
+					addr_list->head = addr_list_item;
+				}
+				if(addr_list->tail != NULL) {
+					addr_list->tail->next = addr_list_item;
+				}
+				addr_list->tail = addr_list_item;
+			}
+//				;
+//			taken = rand() % count;
+//			for (iter = ainfo; taken > 0; iter = iter->ai_next, --taken)
+//				;
+//			resolved_addr = (struct sockaddr_in*)iter->ai_addr;
+//			assert(resolved_addr->sin_family == iter->ai_family && iter->ai_family == AF_INET);
+//			if (count != 1)
+//				log_error(LOG_WARNING, "%s resolves to %d addresses, using %s",
+//				          token, count, inet_ntoa(resolved_addr->sin_addr));
+//			memcpy(addr, &resolved_addr->sin_addr, sizeof(ia));
+			freeaddrinfo(ainfo);
+		}
+		else {
+			if (err == EAI_SYSTEM)
+				parser_error(context, strerror(errno));
+			else
+				parser_error(context, gai_strerror(err));
+			return -1;
+		}
+	}
+	return 0;
+}
+
 static int vp_in_addr2(parser_context *context, void *addr, const char *token)
 {
 	char *host = NULL, *mask = NULL;
@@ -389,6 +465,7 @@ static value_parser value_parser_by_type[] =
 	[pt_uint16] = vp_uint16,
 	[pt_in_addr] = vp_in_addr,
 	[pt_in_addr2] = vp_in_addr2,
+	[pt_in_addr_list] = vp_in_addr_list
 };
 
 extern parser_section redudp_dest_conf_section;

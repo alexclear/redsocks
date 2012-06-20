@@ -203,7 +203,13 @@ static struct sockaddr_in* get_destaddr(redudp_client *client)
 					client->instance->config.destaddr_cur = client->instance->config.destaddr_cur->next;
 				}
 			}
-			result = &client->instance->config.destaddr_cur->destaddr;
+			if(client->instance->config.destaddr_cur->destaddr_list.cur == NULL) {
+				client->instance->config.destaddr_cur->destaddr_list.cur = client->instance->config.destaddr_cur->destaddr_list.head;
+                        }
+			else {
+				client->instance->config.destaddr_cur->destaddr_list.cur = client->instance->config.destaddr_cur->destaddr_list.cur->next;
+			}
+			result = &client->instance->config.destaddr_cur->destaddr_list.cur->addr;
 			fprintf(stderr, "Putting to the hash, total size now is: %i\n", g_hash_table_size(destaddrs_table));
 			g_hash_table_replace(destaddrs_table, client, result);
 		}
@@ -213,6 +219,7 @@ static struct sockaddr_in* get_destaddr(redudp_client *client)
 
 static void redudp_fill_preamble(socks5_udp_preabmle *preamble, redudp_client *client)
 {
+	fprintf(stderr, "In redudp_fill_preamble, client: %li\n", (long) client);
 	preamble->reserved = 0;
 	preamble->frag_no = 0; /* fragmentation is not supported */
 	preamble->addrtype = socks5_addrtype_ipv4;
@@ -629,6 +636,7 @@ static void redudp_pkt_from_socks(int fd, short what, void *_arg)
 		return;
 	}
 
+	fprintf(stderr, "In redudp_pkt_from_socks\n");
 	if (pkt.header.ip.port != get_destaddr(client)->sin_port ||
 	    pkt.header.ip.addr != get_destaddr(client)->sin_addr.s_addr)
 	{
@@ -665,6 +673,7 @@ static void redudp_pkt_from_socks(int fd, short what, void *_arg)
 		                 fwdlen, outgoing);
 		return;
 	}
+	redudp_drop_client(client);
 }
 
 static void redudp_pkt_from_client(int fd, short what, void *_arg)
@@ -695,6 +704,7 @@ static void redudp_pkt_from_client(int fd, short what, void *_arg)
 		redsocks_time(&client->last_client_event);
 		redudp_bump_timeout(client);
 		if (event_initialized(&client->udprelay)) {
+			fprintf(stderr, "In redudp_pkt_from_client, doing redudp_forward_pkt, client: %li\n", (long) client);
 			redudp_forward_pkt(client, buf, pktlen);
 		}
 		else {
@@ -924,7 +934,7 @@ static parser_section redudp_conf_section =
 
 static parser_entry redudp_dest_entries[] =
 {
-	{ .key = "dest_ip",    .type = pt_in_addr },
+	{ .key = "dest_ip",    .type = pt_in_addr_list },
 	{ .key = "dest_port",  .type = pt_uint16 },
 	{ }
 };
@@ -938,12 +948,10 @@ static int redudp_dest_onenter(parser_section *section)
 		return -1;
 	}
 
-	dest->destaddr.sin_family = AF_INET;
-
 	for (parser_entry *entry = &section->entries[0]; entry->key; entry++)
 		entry->addr =
-			(strcmp(entry->key, "dest_ip") == 0)    ? (void*)&dest->destaddr.sin_addr :
-			(strcmp(entry->key, "dest_port") == 0)  ? (void*)&dest->destaddr.sin_port :
+			(strcmp(entry->key, "dest_ip") == 0)    ? (void*)&dest->destaddr_list :
+			(strcmp(entry->key, "dest_port") == 0)  ? (void*)&dest->destaddr_port.sin_port :
 			NULL;
 
         if (instance->config.destaddr_head == NULL) {
@@ -963,7 +971,13 @@ static int redudp_dest_onenter(parser_section *section)
 static int redudp_dest_onexit(parser_section *section)
 {
 	redudp_instance *instance = section->parent->data;
-	instance->config.destaddr_tail->destaddr.sin_port = htons(instance->config.destaddr_tail->destaddr.sin_port);
+	uint16_t port = htons(instance->config.destaddr_tail->destaddr_port.sin_port);
+	fprintf(stderr, "Trying to set the port, %i!\n", port);
+	for(redudp_dest *iter0 = instance->config.destaddr_head; iter0; iter0 = iter0->next)
+        for(in_addr_list_item *iter = iter0->destaddr_list.head; iter; iter = iter->next ) {
+		fprintf(stderr, "Setting port: %i\n", port);
+		iter->addr.sin_port = port;
+        }
 	return 0;
 }
 

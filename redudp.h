@@ -3,7 +3,8 @@
 
 typedef struct redudp_dest_t {
 	struct redudp_dest_t  *next;
-        struct sockaddr_in     destaddr;
+        in_addr_list       destaddr_list;
+	struct sockaddr_in destaddr_port;
 } redudp_dest;
 
 typedef struct redudp_config_t {

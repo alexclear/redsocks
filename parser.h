@@ -10,6 +10,7 @@ typedef enum {
 	pt_uint16,
 	pt_in_addr,
 	pt_in_addr2,  // inaddr[0] = net, inaddr[1] = netmask
+	pt_in_addr_list
 } parser_type;
 
 typedef struct parser_entry_t {
@@ -25,6 +26,17 @@ typedef struct parser_context_t parser_context;
 typedef struct parser_section_t parser_section;
 typedef int  (*parser_section_onenter)(parser_section *section);
 typedef int  (*parser_section_onexit)(parser_section *section);
+
+typedef struct in_addr_list_item_t {
+        struct in_addr_list_item_t *next;
+        struct sockaddr_in        addr;
+} in_addr_list_item;
+
+typedef struct in_addr_list_t {
+	in_addr_list_item      *head;
+        in_addr_list_item      *cur;
+        in_addr_list_item      *tail;
+} in_addr_list;
 
 struct parser_section_t {
 	parser_section         *next;
