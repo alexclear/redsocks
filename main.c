@@ -21,11 +21,15 @@
 #include <signal.h>
 #include <string.h>
 #include <assert.h>
-#include <event.h>
+#include <event2/event.h>
 #include "log.h"
 #include "main.h"
 #include "utils.h"
 #include "version.h"
+
+#include <hiredis.h>
+#include <async.h>
+#include <adapters/libevent.h>
 
 extern app_subsys redsocks_subsys;
 extern app_subsys base_subsys;
@@ -148,6 +152,8 @@ int main(int argc, char **argv)
 			goto shutdown;
 		}
 	}
+
+	
 
 	log_error(LOG_NOTICE, "redsocks started");
 

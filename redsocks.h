@@ -3,7 +3,9 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <netinet/in.h>
-#include <event.h>
+#include <event2/event.h>
+#include <event2/event_struct.h>
+#include <event2/event_compat.h>
 #include "list.h"
 
 
@@ -14,8 +16,8 @@ typedef struct relay_subsys_t {
 	char   *name;
 	size_t  payload_len; // size of relay-specific data in client section
 	size_t  instance_payload_len; // size of relay-specify data in instance section
-	evbuffercb readcb;
-	evbuffercb writecb;
+	bufferevent_data_cb readcb;
+	bufferevent_data_cb writecb;
 	void       (*init)(struct redsocks_client_t *client);
 	void       (*fini)(struct redsocks_client_t *client);
 	void       (*instance_fini)(struct redsocks_instance_t *instance);

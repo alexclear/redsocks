@@ -37,6 +37,8 @@
 #include "main.h"
 #include "redsocks.h"
 #include "redudp.h"
+#include <event2/bufferevent.h>
+#include <event2/bufferevent_struct.h>
 
 #define redudp_log_error(client, prio, msg...) \
 	redsocks_log_write_plain(__FILE__, __LINE__, __func__, 0, &(client)->clientaddr, get_destaddr(client), prio, ## msg)

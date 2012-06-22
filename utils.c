@@ -25,6 +25,9 @@
 #include "log.h"
 #include "utils.h"
 #include "redsocks.h" // for redsocks_close
+#include <event2/bufferevent.h>
+#include <event2/bufferevent_struct.h>
+#include <event2/bufferevent_compat.h>
 
 #define IP_TRANSPARENT  19
 #define IP_ORIGDSTADDR       20
@@ -110,7 +113,7 @@ char *redsocks_evbuffer_readline(struct evbuffer *buf)
 #endif
 }
 
-struct bufferevent* red_connect_relay(struct sockaddr_in *addr, evbuffercb writecb, everrorcb errorcb, void *cbarg)
+struct bufferevent* red_connect_relay(struct sockaddr_in *addr, bufferevent_data_cb writecb, bufferevent_event_cb errorcb, void *cbarg)
 {
 	struct bufferevent *retval = NULL;
 	int on = 1;

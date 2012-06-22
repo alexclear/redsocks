@@ -22,6 +22,8 @@
 #include "log.h"
 #include "redsocks.h"
 #include "socks5.h"
+#include <event2/bufferevent.h>
+#include <event2/bufferevent_struct.h>
 
 typedef enum socks5_state_t {
 	socks5_new,

@@ -31,6 +31,8 @@
 #include "redsocks.h"
 #include "http-auth.h"
 #include "utils.h"
+#include <event2/bufferevent.h>
+#include <event2/bufferevent_struct.h>
 
 #define HTTP_HEAD_WM_HIGH (4096)
 
@@ -155,7 +157,7 @@ static void httpr_relay_read_cb(struct bufferevent *buffev, void *_arg)
 	httpr_buffer_init(&httpr->relay_buffer);
 
 	if (client->state == httpr_request_sent) {
-		size_t len = EVBUFFER_LENGTH(buffev->input);
+		size_t len = evbuffer_get_length(buffev->input);
 		char *line = redsocks_evbuffer_readline(buffev->input);
 		if (line) {
 			httpr_buffer_append(&httpr->relay_buffer, line, strlen(line));

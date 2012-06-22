@@ -19,7 +19,7 @@
 #include <errno.h>
 #include <sys/time.h>
 #include <sys/types.h>
-#include <event.h>
+#include <event2/event.h>
 #include "utils.h"
 #include "log.h"
 
@@ -143,7 +143,7 @@ void _log_vwrite(const char *file, int line, const char *func, int do_errno, int
 
 	if (buff) {
 		evbuffer_add_vprintf(buff, fmt, ap);
-		message = (const char*)EVBUFFER_DATA(buff);
+		message = (const char*)evbuffer_pullup(buff, -1);
 	}
 	else
 		message = lowmem;

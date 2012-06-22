@@ -3,7 +3,9 @@
 
 #include <stddef.h>
 #include <time.h>
-#include <event.h>
+#include <event2/event.h>
+#include <event2/buffer.h>
+#include <event2/bufferevent.h>
 
 struct sockaddr_in;
 
@@ -41,7 +43,7 @@ struct sockaddr_in;
 
 time_t redsocks_time(time_t *t);
 char *redsocks_evbuffer_readline(struct evbuffer *buf);
-struct bufferevent* red_connect_relay(struct sockaddr_in *addr, evbuffercb writecb, everrorcb errorcb, void *cbarg);
+struct bufferevent* red_connect_relay(struct sockaddr_in *addr, bufferevent_data_cb writecb, bufferevent_event_cb errorcb, void *cbarg);
 int red_socket_geterrno(struct bufferevent *buffev);
 int red_is_socket_connected_ok(struct bufferevent *buffev);
 int red_recv_udp_pkt(int fd, char *buf, size_t buflen, struct sockaddr_in *fromaddr, struct sockaddr_in *toaddr);
@@ -50,12 +52,12 @@ int fcntl_nonblock(int fd);
 
 #define event_fmt_str "%s|%s|%s|%s|%s|0x%x"
 #define event_fmt(what) \
-				(what) & EVBUFFER_READ ? "EVBUFFER_READ" : "0", \
-				(what) & EVBUFFER_WRITE ? "EVBUFFER_WRITE" : "0", \
-				(what) & EVBUFFER_EOF ? "EVBUFFER_EOF" : "0", \
-				(what) & EVBUFFER_ERROR ? "EVBUFFER_ERROR" : "0", \
-				(what) & EVBUFFER_TIMEOUT ? "EVBUFFER_TIMEOUT" : "0", \
-				(what) & ~(EVBUFFER_READ|EVBUFFER_WRITE|EVBUFFER_EOF|EVBUFFER_ERROR|EVBUFFER_TIMEOUT)
+				(what) & BEV_EVENT_READING ? "BEV_EVENT_READING" : "0", \
+				(what) & BEV_EVENT_WRITING ? "BEV_EVENT_WRITING" : "0", \
+				(what) & BEV_EVENT_EOF     ? "BEV_EVENT_EOF" : "0", \
+				(what) & BEV_EVENT_ERROR   ? "BEV_EVENT_ERROR" : "0", \
+				(what) & BEV_EVENT_TIMEOUT ? "BEV_EVENT_TIMEOUT" : "0", \
+				(what) & ~(BEV_EVENT_READING|BEV_EVENT_WRITING|BEV_EVENT_EOF|BEV_EVENT_ERROR|BEV_EVENT_TIMEOUT)
 
 #if INET6_ADDRSTRLEN < INET_ADDRSTRLEN
 #	error Impossible happens: INET6_ADDRSTRLEN < INET_ADDRSTRLEN

@@ -30,6 +30,8 @@
 #include "log.h"
 #include "redsocks.h"
 #include "http-auth.h"
+#include <event2/bufferevent.h>
+#include <event2/bufferevent_struct.h>
 
 typedef enum httpc_state_t {
 	httpc_new,
@@ -85,7 +87,7 @@ static void httpc_read_cb(struct bufferevent *buffev, void *_arg)
 	redsocks_touch_client(client);
 
 	if (client->state == httpc_request_sent) {
-		size_t len = EVBUFFER_LENGTH(buffev->input);
+		size_t len = evbuffer_get_length(buffev->input);
 		char *line = redsocks_evbuffer_readline(buffev->input);
 		if (line) {
 			unsigned int code;

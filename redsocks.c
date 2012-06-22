@@ -25,7 +25,11 @@
 #include <time.h>
 #include <errno.h>
 #include <assert.h>
-#include <event.h>
+#include <event2/event.h>
+#include <event2/buffer_compat.h>
+#include <event2/bufferevent.h>
+#include <event2/bufferevent_struct.h>
+#include <event2/bufferevent_compat.h>
 #include "list.h"
 #include "parser.h"
 #include "log.h"
@@ -238,7 +242,7 @@ void redsocks_touch_client(redsocks_client *client)
 
 static void redsocks_relay_readcb(redsocks_client *client, struct bufferevent *from, struct bufferevent *to)
 {
-	if (EVBUFFER_LENGTH(to->output) < to->wm_write.high) {
+	if (evbuffer_get_length(to->output) < to->wm_write.high) {
 		if (bufferevent_write_buffer(to, from->input) == -1)
 			redsocks_log_errno(client, LOG_ERR, "bufferevent_write_buffer");
 	}
@@ -253,10 +257,10 @@ static void redsocks_relay_writecb(redsocks_client *client, struct bufferevent *
 	assert(from == client->client || from == client->relay);
 	char from_eof = (from == client->client ? client->client_evshut : client->relay_evshut) & EV_READ;
 
-	if (EVBUFFER_LENGTH(from->input) == 0 && from_eof) {
+	if (evbuffer_get_length(from->input) == 0 && from_eof) {
 		redsocks_shutdown(client, to, SHUT_WR);
 	}
-	else if (EVBUFFER_LENGTH(to->output) < to->wm_write.high) {
+	else if (evbuffer_get_length(to->output) < to->wm_write.high) {
 		if (bufferevent_write_buffer(to, from->input) == -1)
 			redsocks_log_errno(client, LOG_ERR, "bufferevent_write_buffer");
 		if (bufferevent_enable(from, EV_READ) == -1)
@@ -415,7 +419,7 @@ static void redsocks_event_error(struct bufferevent *buffev, short what, void *_
 
 	redsocks_touch_client(client);
 
-	if (what == (EVBUFFER_READ|EVBUFFER_EOF)) {
+	if (what == (BEV_EVENT_READING|BEV_EVENT_EOF)) {
 		struct bufferevent *antiev;
 		if (buffev == client->relay)
 			antiev = client->client;
@@ -424,7 +428,7 @@ static void redsocks_event_error(struct bufferevent *buffev, short what, void *_
 
 		redsocks_shutdown(client, buffev, SHUT_RD);
 
-		if (antiev != NULL && EVBUFFER_LENGTH(antiev->output) == 0)
+		if (antiev != NULL && evbuffer_get_length(antiev->output) == 0)
 			redsocks_shutdown(client, antiev, SHUT_WR);
 	}
 	else {
@@ -448,7 +452,7 @@ int sizes_greater_equal(size_t a, size_t b)
 
 int redsocks_read_expected(redsocks_client *client, struct evbuffer *input, void *data, size_comparator comparator, size_t expected)
 {
-	size_t len = EVBUFFER_LENGTH(input);
+	size_t len = evbuffer_get_length(input);
 	if (comparator(len, expected)) {
 		int read = evbuffer_remove(input, data, expected);
 		UNUSED(read);

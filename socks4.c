@@ -19,6 +19,8 @@
 #include <assert.h>
 #include "log.h"
 #include "redsocks.h"
+#include <event2/bufferevent.h>
+#include <event2/bufferevent_struct.h>
 
 typedef enum socks4_state_t {
 	socks4_new,
