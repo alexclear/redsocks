@@ -7,15 +7,29 @@ typedef struct redudp_dest_t {
 	struct sockaddr_in destaddr_port;
 } redudp_dest;
 
+typedef struct redudp_proxy_info_t {
+	struct sockaddr_in relayaddr;
+        char *login;
+        char *password;
+} redudp_proxy_info;
+
+typedef struct redudp_proxy_t {
+	struct redudp_proxy_t  *next;
+        redudp_proxy_info proxyinfo;
+} redudp_proxy;
+
 typedef struct redudp_config_t {
 	struct sockaddr_in bindaddr;
-	struct sockaddr_in relayaddr;
+//	struct sockaddr_in relayaddr;
 	// TODO:           outgoingaddr;
 	redudp_dest       *destaddr_head;
 	redudp_dest       *destaddr_tail;
 	redudp_dest       *destaddr_cur;
-	char *login;
-	char *password;
+	redudp_proxy      *relayaddr_head;
+	redudp_proxy      *relayaddr_tail;
+	redudp_proxy      *relayaddr_cur;
+//	char *login;
+//	char *password;
 	uint16_t max_pktqueue;
 	uint16_t udp_timeout;
 	uint16_t udp_timeout_stream;

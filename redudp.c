@@ -177,6 +177,34 @@ static int do_tproxy(redudp_instance* instance)
 }
 
 GHashTable *destaddrs_table;
+GHashTable *proxies_table;
+
+static redudp_proxy_info* get_proxyinfo(redudp_client *client)
+{
+	redudp_proxy_info* result;
+	if(proxies_table == NULL) {
+		proxies_table = g_hash_table_new(NULL, NULL);
+	}
+	result = g_hash_table_lookup(proxies_table, client);
+	if(result == NULL) {
+		// Round robin in all its glory
+		if(client->instance->config.relayaddr_cur == NULL) {
+			client->instance->config.relayaddr_cur = client->instance->config.relayaddr_head;
+		}
+		else {
+			if(client->instance->config.relayaddr_cur == client->instance->config.relayaddr_tail) {
+				client->instance->config.relayaddr_cur = client->instance->config.relayaddr_head;
+			}
+			else {
+				client->instance->config.relayaddr_cur = client->instance->config.relayaddr_cur->next;
+			}
+		}
+		result = &client->instance->config.relayaddr_cur->proxyinfo;
+		fprintf(stderr, "Putting to the proxies_table hash, total size now is: %i\n", g_hash_table_size(proxies_table));
+		g_hash_table_replace(proxies_table, client, result);
+	}
+	return result;
+}
 
 static struct sockaddr_in* get_destaddr(redudp_client *client)
 {
@@ -207,12 +235,19 @@ static struct sockaddr_in* get_destaddr(redudp_client *client)
 				client->instance->config.destaddr_cur->destaddr_list.cur = client->instance->config.destaddr_cur->destaddr_list.head;
                         }
 			else {
-				client->instance->config.destaddr_cur->destaddr_list.cur = client->instance->config.destaddr_cur->destaddr_list.cur->next;
+				if(client->instance->config.destaddr_cur->destaddr_list.cur == client->instance->config.destaddr_cur->destaddr_list.tail) {
+					client->instance->config.destaddr_cur->destaddr_list.cur = client->instance->config.destaddr_cur->destaddr_list.head;
+				}
+				else {
+					client->instance->config.destaddr_cur->destaddr_list.cur = client->instance->config.destaddr_cur->destaddr_list.cur->next;
+				}
 			}
 			result = &client->instance->config.destaddr_cur->destaddr_list.cur->addr;
+			fprintf(stderr, "Result: %li\n", (long) result);
 			fprintf(stderr, "Putting to the hash, total size now is: %i\n", g_hash_table_size(destaddrs_table));
 			g_hash_table_replace(destaddrs_table, client, result);
 		}
+		fprintf(stderr, "Returning %li\n", (long) result);
 		return result;
 	}
 }
@@ -235,8 +270,8 @@ static struct evbuffer* socks5_mkmethods_plain_wrapper(void *p)
 
 static struct evbuffer* socks5_mkpassword_plain_wrapper(void *p)
 {
-	redudp_instance *self = p;
-	return socks5_mkpassword_plain(self->config.login, self->config.password);
+	redudp_client *client = p;
+	return socks5_mkpassword_plain(get_proxyinfo(client)->login, get_proxyinfo(client)->password);
 }
 
 static struct evbuffer* socks5_mkassociate(void *p)
@@ -280,6 +315,7 @@ static void redudp_drop_client(redudp_client *client)
 	}
 	list_del(&client->list);
 	g_hash_table_remove(destaddrs_table, client);
+	g_hash_table_remove(proxies_table, client);
 	free(client);
 }
 
@@ -467,7 +503,7 @@ fail:
 static void redudp_read_auth_methods(struct bufferevent *buffev, void *_arg)
 {
 	redudp_client *client = _arg;
-	int do_password = socks5_is_valid_cred(client->instance->config.login, client->instance->config.password);
+	int do_password = socks5_is_valid_cred(get_proxyinfo(client)->login, get_proxyinfo(client)->password);
 	socks5_method_reply reply;
 	int read = evbuffer_remove(buffev->input, &reply, sizeof(reply));
 	const char *error = NULL;
@@ -496,7 +532,7 @@ static void redudp_read_auth_methods(struct bufferevent *buffev, void *_arg)
 	}
 	else if (reply.method == socks5_auth_password) {
 		ierror = redsocks_write_helper_ex_plain(
-				client->relay, NULL, socks5_mkpassword_plain_wrapper, client->instance, 0, /* last one is ignored */
+				client->relay, NULL, socks5_mkpassword_plain_wrapper, client, 0, /* last one is ignored */
 				sizeof(socks5_auth_reply), sizeof(socks5_auth_reply));
 		if (ierror)
 			goto fail;
@@ -515,10 +551,10 @@ fail:
 static void redudp_relay_connected(struct bufferevent *buffev, void *_arg)
 {
 	redudp_client *client = _arg;
-	int do_password = socks5_is_valid_cred(client->instance->config.login, client->instance->config.password);
+	int do_password = socks5_is_valid_cred(get_proxyinfo(client)->login, get_proxyinfo(client)->password);
 	int error;
 	char relayaddr_str[RED_INET_ADDRSTRLEN];
-	redudp_log_error(client, LOG_DEBUG, "via %s", red_inet_ntop(&client->instance->config.relayaddr, relayaddr_str, sizeof(relayaddr_str)));
+	redudp_log_error(client, LOG_DEBUG, "via %s", red_inet_ntop(&get_proxyinfo(client)->relayaddr, relayaddr_str, sizeof(relayaddr_str)));
 
 	if (!red_is_socket_connected_ok(buffev)) {
 		redudp_log_errno(client, LOG_NOTICE, "red_is_socket_connected_ok");
@@ -565,8 +601,6 @@ static void redudp_first_pkt_from_client(redudp_instance *self, struct sockaddr_
 		return;
 	}
 
-        char relayaddr_str[RED_INET_ADDRSTRLEN];
-
 	INIT_LIST_HEAD(&client->list);
 	INIT_LIST_HEAD(&client->queue);
 	client->instance = self;
@@ -579,7 +613,7 @@ static void redudp_first_pkt_from_client(redudp_instance *self, struct sockaddr_
 	client->sender_fd = -1; // it's postponed until socks-server replies to avoid trivial DoS
 
 //	fprintf(stderr, "addr: %s", red_inet_ntop(&client->instance->config.relayaddr, relayaddr_str, sizeof(relayaddr_str)));
-	client->relay = red_connect_relay(&client->instance->config.relayaddr,
+	client->relay = red_connect_relay(&get_proxyinfo(client)->relayaddr,
 	                                  redudp_relay_connected, redudp_relay_error, client);
 	if (!client->relay)
 		goto fail;
@@ -748,12 +782,15 @@ static int redudp_onenter(parser_section *section)
 	INIT_LIST_HEAD(&instance->clients);
 	instance->config.bindaddr.sin_family = AF_INET;
 	instance->config.bindaddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-	instance->config.relayaddr.sin_family = AF_INET;
-	instance->config.relayaddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+//	instance->config.relayaddr.sin_family = AF_INET;
+//	instance->config.relayaddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 //	instance->config.destaddr.sin_family = AF_INET;
 	instance->config.destaddr_cur = NULL;
 	instance->config.destaddr_head = NULL;
 	instance->config.destaddr_tail = NULL;
+	instance->config.relayaddr_cur = NULL;
+	instance->config.relayaddr_head = NULL;
+	instance->config.relayaddr_tail = NULL;
 	instance->config.max_pktqueue = 5;
 	instance->config.udp_timeout = 30;
 	instance->config.udp_timeout_stream = 180;
@@ -762,10 +799,10 @@ static int redudp_onenter(parser_section *section)
 		entry->addr =
 			(strcmp(entry->key, "local_ip") == 0)   ? (void*)&instance->config.bindaddr.sin_addr :
 			(strcmp(entry->key, "local_port") == 0) ? (void*)&instance->config.bindaddr.sin_port :
-			(strcmp(entry->key, "ip") == 0)         ? (void*)&instance->config.relayaddr.sin_addr :
-			(strcmp(entry->key, "port") == 0)       ? (void*)&instance->config.relayaddr.sin_port :
-			(strcmp(entry->key, "login") == 0)      ? (void*)&instance->config.login :
-			(strcmp(entry->key, "password") == 0)   ? (void*)&instance->config.password :
+//			(strcmp(entry->key, "ip") == 0)         ? (void*)&instance->config.relayaddr.sin_addr :
+//			(strcmp(entry->key, "port") == 0)       ? (void*)&instance->config.relayaddr.sin_port :
+//			(strcmp(entry->key, "login") == 0)      ? (void*)&instance->config.login :
+//			(strcmp(entry->key, "password") == 0)   ? (void*)&instance->config.password :
 //			(strcmp(entry->key, "dest_ip") == 0)    ? (void*)&instance->config.destaddr.sin_addr :
 //			(strcmp(entry->key, "dest_port") == 0)  ? (void*)&instance->config.destaddr.sin_port :
 			(strcmp(entry->key, "max_pktqueue") == 0) ? (void*)&instance->config.max_pktqueue :
@@ -785,7 +822,7 @@ static int redudp_onexit(parser_section *section)
 		entry->addr = NULL;
 
 	instance->config.bindaddr.sin_port = htons(instance->config.bindaddr.sin_port);
-	instance->config.relayaddr.sin_port = htons(instance->config.relayaddr.sin_port);
+//	instance->config.relayaddr.sin_port = htons(instance->config.relayaddr.sin_port);
 //	instance->config.destaddr.sin_port = htons(instance->config.destaddr.sin_port);
 
 	if (instance->config.udp_timeout_stream < instance->config.udp_timeout) {
@@ -888,9 +925,10 @@ static void redudp_fini_instance(redudp_instance *instance)
 	}
 
 	list_del(&instance->list);
+	// TODO: delete proxies and dests lists
 
-	free(instance->config.login);
-	free(instance->config.password);
+//	free(instance->config.login);
+//	free(instance->config.password);
 
 	memset(instance, 0, sizeof(*instance));
 	free(instance);
@@ -974,10 +1012,10 @@ static int redudp_dest_onexit(parser_section *section)
 	uint16_t port = htons(instance->config.destaddr_tail->destaddr_port.sin_port);
 	fprintf(stderr, "Trying to set the port, %i!\n", port);
 	for(redudp_dest *iter0 = instance->config.destaddr_head; iter0; iter0 = iter0->next)
-        for(in_addr_list_item *iter = iter0->destaddr_list.head; iter; iter = iter->next ) {
-		fprintf(stderr, "Setting port: %i\n", port);
-		iter->addr.sin_port = port;
-        }
+        	for(in_addr_list_item *iter = iter0->destaddr_list.head; iter; iter = iter->next ) {
+			fprintf(stderr, "Setting port: %i\n", port);
+			iter->addr.sin_port = port;
+        	}
 	return 0;
 }
 
@@ -987,6 +1025,63 @@ parser_section redudp_dest_conf_section =
 	.entries = redudp_dest_entries,
 	.onenter = redudp_dest_onenter,
 	.onexit  = redudp_dest_onexit
+};
+
+static parser_entry redudp_proxy_entries[] =
+{
+	{ .key = "ip",         .type = pt_in_addr },
+	{ .key = "port",       .type = pt_uint16 },
+	{ .key = "login",      .type = pt_pchar },
+	{ .key = "password",   .type = pt_pchar },
+	{ }
+};
+
+static int redudp_proxy_onenter(parser_section *section)
+{
+	redudp_instance *instance = section->parent->data;
+	redudp_proxy *proxy = calloc(1, sizeof(*proxy));
+	if (!proxy) {
+		parser_error(section->context, "Not enough memory");
+		return -1;
+	}
+
+	proxy->proxyinfo.relayaddr.sin_family = AF_INET;
+	proxy->proxyinfo.relayaddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+
+	for (parser_entry *entry = &section->entries[0]; entry->key; entry++)
+		entry->addr =
+			(strcmp(entry->key, "ip") == 0)         ? (void*)&proxy->proxyinfo.relayaddr.sin_addr :
+			(strcmp(entry->key, "port") == 0)       ? (void*)&proxy->proxyinfo.relayaddr.sin_port :
+			(strcmp(entry->key, "login") == 0)      ? (void*)&proxy->proxyinfo.login :
+			(strcmp(entry->key, "password") == 0)   ? (void*)&proxy->proxyinfo.password :
+			NULL;
+
+        if (instance->config.relayaddr_head == NULL) {
+		instance->config.relayaddr_head = proxy;
+                fprintf(stderr, "Setting proxy head\n");
+        }
+        if (instance->config.relayaddr_tail != NULL) {
+                instance->config.relayaddr_tail->next = proxy;
+                fprintf(stderr, "Setting proxy next\n");
+        }
+        instance->config.relayaddr_tail = proxy;
+
+	return 0;
+}
+
+static int redudp_proxy_onexit(parser_section *section)
+{
+	redudp_instance *instance = section->parent->data;
+	instance->config.relayaddr_tail->proxyinfo.relayaddr.sin_port = htons(instance->config.relayaddr_tail->proxyinfo.relayaddr.sin_port);
+	return 0;
+}
+
+parser_section redudp_proxy_conf_section =
+{
+	.name    = "proxy",
+	.entries = redudp_proxy_entries,
+	.onenter = redudp_proxy_onenter,
+	.onexit  = redudp_proxy_onexit
 };
 
 app_subsys redudp_subsys =

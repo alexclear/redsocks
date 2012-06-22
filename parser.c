@@ -469,6 +469,7 @@ static value_parser value_parser_by_type[] =
 };
 
 extern parser_section redudp_dest_conf_section;
+extern parser_section redudp_proxy_conf_section;
 
 int parser_run(parser_context *context)
 {
@@ -556,10 +557,21 @@ int parser_run(parser_context *context)
 					}
 					fprintf(stderr, "Section-in-section name: %s\n", key_token);
 					nested_section = malloc(sizeof(parser_section)); // TODO: free at some point
-					nested_section->entries = redudp_dest_conf_section.entries;
-					nested_section->onenter = redudp_dest_conf_section.onenter;
-					nested_section->onexit = redudp_dest_conf_section.onexit;
-					nested_section->name = "dest";
+					if(strcmp(key_token, "dest") == 0) {
+						nested_section->entries = redudp_dest_conf_section.entries;
+						nested_section->onenter = redudp_dest_conf_section.onenter;
+						nested_section->onexit = redudp_dest_conf_section.onexit;
+						nested_section->name = "dest";
+					}
+					else if(strcmp(key_token, "proxy") == 0) {
+						nested_section->entries = redudp_proxy_conf_section.entries;
+						nested_section->onenter = redudp_proxy_conf_section.onenter;
+						nested_section->onexit = redudp_proxy_conf_section.onexit;
+						nested_section->name = "proxy";
+					}
+					else {
+						parser_error(context, "nested section has an invalid name");
+					}
 
 					if (section->nested_head == NULL) {
 						section->nested_head = nested_section;

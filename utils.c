@@ -117,6 +117,8 @@ struct bufferevent* red_connect_relay(struct sockaddr_in *addr, evbuffercb write
 	int relay_fd = -1;
 	int error;
 
+	redsocks_log_write_plain(__FILE__, __LINE__, __func__, 0, addr, addr, LOG_DEBUG, "Doing red_connect_relay");
+
 	relay_fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (relay_fd == -1) {
 		log_errno(LOG_ERR, "socket");
