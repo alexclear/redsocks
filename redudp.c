@@ -51,6 +51,8 @@ static void redudp_fini_instance(redudp_instance *instance);
 static int redudp_fini();
 static int redudp_transparent(int fd);
 
+extern struct event_base *eventbase;
+
 typedef struct redudp_expected_assoc_reply_t {
 	socks5_reply h;
 	socks5_addr_ipv4 ip;
@@ -298,13 +300,13 @@ static void redudp_drop_client(redudp_client *client)
 			redudp_log_errno(client, LOG_ERR, "event_del");
 	}
 	if (client->relay) {
-		fd = EVENT_FD(&client->relay->ev_read);
+		fd = ((int)event_get_fd(&client->relay->ev_read));
 		bufferevent_free(client->relay);
 		shutdown(fd, SHUT_RDWR);
 		redsocks_close(fd);
 	}
 	if (event_initialized(&client->udprelay)) {
-		fd = EVENT_FD(&client->udprelay);
+		fd = ((int)event_get_fd(&client->udprelay));
 		if (event_del(&client->udprelay) == -1)
 			redudp_log_errno(client, LOG_ERR, "event_del");
 		redsocks_close(fd);
@@ -353,7 +355,7 @@ static void redudp_forward_pkt(redudp_client *client, char *buf, size_t pktlen)
 	io[1].iov_base = buf;
 	io[1].iov_len = pktlen;
 
-	outgoing = sendmsg(EVENT_FD(&client->udprelay), &msg, 0);
+	outgoing = sendmsg(((int)event_get_fd(&client->udprelay)), &msg, 0);
 	if (outgoing == -1) {
 		redudp_log_errno(client, LOG_WARNING, "sendmsg: Can't forward packet, dropping it");
 		return;
@@ -450,7 +452,7 @@ static void redudp_read_assoc_reply(struct bufferevent *buffev, void *_arg)
 		goto fail;
 	}
 
-	event_set(&client->udprelay, fd, EV_READ | EV_PERSIST, redudp_pkt_from_socks, client);
+	event_assign(&client->udprelay, eventbase, fd, EV_READ | EV_PERSIST, redudp_pkt_from_socks, client);
 	error = event_add(&client->udprelay, NULL);
 	if (error) {
 		redudp_log_errno(client, LOG_ERR, "event_add");
@@ -609,7 +611,7 @@ static void redudp_first_pkt_from_client(redudp_instance *self, struct sockaddr_
 	memcpy(&client->clientaddr, clientaddr, sizeof(*clientaddr));
 	if (destaddr)
 		memcpy(&client->destaddr, destaddr, sizeof(client->destaddr));
-	evtimer_set(&client->timeout, redudp_timeout, client);
+	event_assign(&client->timeout, eventbase, -1, 0, redudp_timeout, client);
 	// XXX: self->relay_ss->init(client);
 
 	client->sender_fd = -1; // it's postponed until socks-server replies to avoid trivial DoS
@@ -646,7 +648,7 @@ static void redudp_pkt_from_socks(int fd, short what, void *_arg)
 	ssize_t pktlen, fwdlen, outgoing;
 	struct sockaddr_in udprelayaddr;
 
-	assert(fd == EVENT_FD(&client->udprelay));
+	assert(fd == ((int)event_get_fd(&client->udprelay)));
 
 	pktlen = red_recv_udp_pkt(fd, pkt.buf, sizeof(pkt.buf), &udprelayaddr, NULL);
 	if (pktlen == -1)
@@ -701,7 +703,7 @@ static void redudp_pkt_from_socks(int fd, short what, void *_arg)
 	fwdlen = pktlen - sizeof(pkt.header);
 	outgoing = sendto(do_tproxy(client->instance)
 	                      ? client->sender_fd
-	                      : EVENT_FD(&client->instance->listener),
+	                      : ((int)event_get_fd(&client->instance->listener)),
 	                  pkt.buf + sizeof(pkt.header), fwdlen, 0,
 	                  (struct sockaddr*)&client->clientaddr, sizeof(client->clientaddr));
 	if (outgoing != fwdlen) {
@@ -722,7 +724,7 @@ static void redudp_pkt_from_client(int fd, short what, void *_arg)
 
 	pdestaddr = do_tproxy(self) ? &destaddr : NULL;
 
-	assert(fd == EVENT_FD(&self->listener));
+	assert(fd == ((int)event_get_fd(&self->listener)));
 	pktlen = red_recv_udp_pkt(fd, buf, sizeof(buf), &clientaddr, pdestaddr);
 	if (pktlen == -1)
 		return;
@@ -886,7 +888,7 @@ static int redudp_init_instance(redudp_instance *instance)
 		goto fail;
 	}
 
-	event_set(&instance->listener, fd, EV_READ | EV_PERSIST, redudp_pkt_from_client, instance);
+	event_assign(&instance->listener, eventbase, fd, EV_READ | EV_PERSIST, redudp_pkt_from_client, instance);
 	error = event_add(&instance->listener, NULL);
 	if (error) {
 		log_errno(LOG_ERR, "event_add");
@@ -922,7 +924,7 @@ static void redudp_fini_instance(redudp_instance *instance)
 	if (event_initialized(&instance->listener)) {
 		if (event_del(&instance->listener) != 0)
 			log_errno(LOG_WARNING, "event_del");
-		redsocks_close(EVENT_FD(&instance->listener));
+		redsocks_close(((int)event_get_fd(&instance->listener)));
 		memset(&instance->listener, 0, sizeof(instance->listener));
 	}
 

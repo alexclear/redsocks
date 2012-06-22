@@ -27,10 +27,12 @@
 #include "redsocks.h" // for redsocks_close
 #include <event2/bufferevent.h>
 #include <event2/bufferevent_struct.h>
-#include <event2/bufferevent_compat.h>
+///#include <event2/bufferevent_compat.h>
 
 #define IP_TRANSPARENT  19
 #define IP_ORIGDSTADDR       20
+
+extern struct event_base *eventbase;
 
 int red_recv_udp_pkt(int fd, char *buf, size_t buflen, struct sockaddr_in *inaddr, struct sockaddr_in *toaddr)
 {
@@ -146,11 +148,13 @@ struct bufferevent* red_connect_relay(struct sockaddr_in *addr, bufferevent_data
 		goto fail;
 	}
 
-	retval = bufferevent_new(relay_fd, NULL, writecb, errorcb, cbarg);
+//	retval = bufferevent_new(relay_fd, NULL, writecb, errorcb, cbarg);
+	retval = bufferevent_socket_new(eventbase, relay_fd, 0);
 	if (!retval) {
 		log_errno(LOG_ERR, "bufferevent_new");
 		goto fail;
 	}
+        bufferevent_setcb(retval, NULL, writecb, errorcb, cbarg);
 
 	error = bufferevent_enable(retval, EV_WRITE); // we wait for connection...
 	if (error) {
@@ -174,9 +178,9 @@ int red_socket_geterrno(struct bufferevent *buffev)
 	int pseudo_errno;
 	socklen_t optlen = sizeof(pseudo_errno);
 
-	assert(EVENT_FD(&buffev->ev_read) == EVENT_FD(&buffev->ev_write));
+	assert(((int)event_get_fd(&buffev->ev_read)) == ((int)event_get_fd(&buffev->ev_write)));
 
-	error = getsockopt(EVENT_FD(&buffev->ev_read), SOL_SOCKET, SO_ERROR, &pseudo_errno, &optlen);
+	error = getsockopt(((int)event_get_fd(&buffev->ev_read)), SOL_SOCKET, SO_ERROR, &pseudo_errno, &optlen);
 	if (error) {
 		log_errno(LOG_ERR, "getsockopt");
 		return -1;

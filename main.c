@@ -60,6 +60,8 @@ static void red_srand()
 	srand(tv.tv_sec*1000000+tv.tv_usec);
 }
 
+struct event_base *eventbase;
+
 int main(int argc, char **argv)
 {
 	int error;
@@ -69,6 +71,8 @@ int main(int argc, char **argv)
 	bool conftest = false;
 	int opt;
 	int i;
+
+	eventbase = event_base_new();
 
 	red_srand();
 	while ((opt = getopt(argc, argv, "h?vtc:p:")) != -1) {
@@ -157,7 +161,7 @@ int main(int argc, char **argv)
 
 	log_error(LOG_NOTICE, "redsocks started");
 
-	event_dispatch();
+	event_base_dispatch(eventbase);
 
 	log_error(LOG_NOTICE, "redsocks goes down");
 
@@ -174,7 +178,7 @@ shutdown:
 		if ((*ss)->fini)
 			(*ss)->fini();
 
-	event_base_free(NULL);
+	event_base_free(eventbase);
 
 	return !error ? EXIT_SUCCESS : EXIT_FAILURE;
 }

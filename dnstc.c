@@ -54,6 +54,8 @@ typedef struct dns_header_t {
 #define DNS_TC 0x02
 #define DNS_Z  0x70
 
+extern struct event_base *eventbase;
+
 /***********************************************************************
  * Logic
  */
@@ -67,7 +69,7 @@ static void dnstc_pkt_from_client(int fd, short what, void *_arg)
 	} buf;
 	ssize_t pktlen, outgoing;
 
-	assert(fd == EVENT_FD(&self->listener));
+	assert(fd == ((int)event_get_fd(&self->listener)));
 	pktlen = red_recv_udp_pkt(fd, buf.raw, sizeof(buf), &clientaddr, NULL);
 	if (pktlen == -1)
 		return;
@@ -173,7 +175,7 @@ static int dnstc_init_instance(dnstc_instance *instance)
 		goto fail;
 	}
 
-	event_set(&instance->listener, fd, EV_READ | EV_PERSIST, dnstc_pkt_from_client, instance);
+	event_assign(&instance->listener, eventbase, fd, EV_READ | EV_PERSIST, dnstc_pkt_from_client, instance);
 	error = event_add(&instance->listener, NULL);
 	if (error) {
 		log_errno(LOG_ERR, "event_add");
@@ -201,7 +203,7 @@ static void dnstc_fini_instance(dnstc_instance *instance)
 	if (event_initialized(&instance->listener)) {
 		if (event_del(&instance->listener) != 0)
 			log_errno(LOG_WARNING, "event_del");
-		if (close(EVENT_FD(&instance->listener)) != 0)
+		if (close(((int)event_get_fd(&instance->listener))) != 0)
 			log_errno(LOG_WARNING, "close");
 		memset(&instance->listener, 0, sizeof(instance->listener));
 	}

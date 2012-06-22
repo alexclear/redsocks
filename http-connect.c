@@ -134,7 +134,7 @@ static void httpc_read_cb(struct bufferevent *buffev, void *_arg)
 							}
 
 							/* close relay tunnel */
-							redsocks_close(EVENT_FD(&client->relay->ev_write));
+							redsocks_close(((int)event_get_fd(&client->relay->ev_write)));
 							bufferevent_free(client->relay);
 
 							/* set to initial state*/
